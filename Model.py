@@ -184,7 +184,7 @@ class XfmrModel(nn.Module):
 def RunTraining():
     for iter in range(max_iters):
         if iter % 500 == 0 or iter == max_iters - 1:
-            torch.save(model.state_dict, path)
+            torch.save(model.state_dict(), path)
         if iter % eval_interval == 0 or iter == max_iters - 1:
             losses = estimate_loss()
             print(f"step {iter}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
@@ -199,7 +199,8 @@ def RunTraining():
 path = "/workspaces/OLF-Data/OLFNetwork.pt"
 model = XfmrModel()
 if os.path.isfile(path):
-    model.load_state_dict(torch.load(path))
+    statedict = torch.load(path)
+    model.load_state_dict(statedict)
 
 m = model.to(device)
 print(sum(p.numel() for p in m.parameters())/1e6, 'M parameters')
@@ -208,17 +209,19 @@ optimizer = torch.optim.AdamW(model.parameters(), lr = learning_rate)
 
 while True:
     usage = input("Train or Test?")
-    if usage == "Train":
-        test = input("Test your room name")
-        test_inputs = []
-        for char in len(text):
-            _input = [0] * block_size
-            for i in range(block_size):
-                if char + i < len(subtext):
-                    _input[i] = chars.index(subtext[c + i])
-            test_inputs.append(_input)
-        test_input = torch.tensor(test_inputs)
-        test_output = model(test_input)
-        print(outputs[torch.max(test_output)])
-    elif usage == "Test":
+    if usage == "Test":
+        test = ""
+        while test != 'X':
+            test = input("Test your room name")
+            test_inputs = []
+            for char in len(text):
+                _input = [0] * block_size
+                for i in range(block_size):
+                    if char + i < len(subtext):
+                        _input[i] = chars.index(subtext[c + i])
+                test_inputs.append(_input)
+            test_input = torch.tensor(test_inputs)
+            test_output = model(test_input)
+            print(outputs[torch.max(test_output)])
+    elif usage == "Train":
         RunTraining()
