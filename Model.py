@@ -2,55 +2,68 @@ import torch
 import torch.nn as nn
 import math
 from torch.nn import functional as F
+from dataclasses import dataclass
 
 # hyperparameters
 batch_size = 8 # how many independent sequences will we process in parallel?
 block_size = 16 # what is the maximum context length for predictions?
-max_iters = 3000
-eval_interval = 100
-learning_rate = 1e-2
+max_iters = 5000
+eval_interval = 500
+learning_rate = 3e-4
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 eval_iters = 200
+n_embd = 384
+n_head = 6
+n_layer = 6
+dropout = 0.2
 # ------------
 
 with open('OLFNetworkData.txt', 'r', encoding='utf-8') as f:
     text = f.read()
 
 chars = [' ', ',', '_', '.', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M',
-        'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', '0', '1', '2', '3', '4', '5' '6', '7', '8', '9']
+        'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9']
 
 outputs = ['0', '5', '7', '11', '15', '20', '30','35', '40', '50', '60', '100', '120', '150', '200', '240', '300', '500']
 
 # here are all the unique characters that occur in this text
 vocab_size = len(chars)
 output_size = len(outputs)
-# create a mapping from characters to integers
-stoi = { ch:i for i,ch in enumerate(chars) }
-itos = { i:ch for i,ch in enumerate(chars) }
-encode = lambda s: [stoi[c] for c in s] # encoder: take a string, output a list of integers
-decode = lambda l: ''.join([itos[i] for i in l]) # decoder: take a list of integers, output a string
+
+_inputs = []
+_outputs = []
+
+for line in text.splitlines():
+    parts = line.split(',')
+    subtext = parts[0].upper()
+    part_length = len(parts)
+    for c in range(len(subtext)):
+        _input = [0] * block_size
+        _output = [0] * len(outputs)
+        for i in range(block_size):
+            if c + i < len(subtext):
+                _input[i] = chars.index(subtext[c + i])
+            _output[int(line.split(',')[part_length - 1])]
+            _inputs.append(_input)
+            _outputs.append(_output)
 
 # Train and test splits
-data = torch.tensor(encode(text), dtype=torch.long)
-n = int(0.9*len(data)) # first 90% will be train, rest val
-train_data = data[:n]
-val_data = data[n:]
-
-class ModelConfig:
-    block_size: int = None
-    vocab_size: int = None
-    output_size: int = None
-    n_layer: int = 4
-    n_embd: int = 64
-    n_head: int = 4
+inputs = torch.tensor(_inputs, dtype=torch.long)
+outputs = torch.tensor(_outputs, dtype=torch.long)
+n = int(0.9*len(inputs)) # first 90% will be train, rest val
+train_data = inputs[:n]
+train_outputs = outputs[:n]
+val_data = inputs[n:]
+val_outputs = outputs[n:]
 
 # data loading
 def get_batch(split):
     # generate a small batch of data of inputs x and targets y
     data = train_data if split == 'train' else val_data
+    data_out = train_outputs if split == 'train' else val_outputs
     ix = torch.randint(len(data) - block_size, (batch_size,))
     x = torch.stack([data[i:i+block_size] for i in ix])
-    y = torch.stack([data[i+1:i+block_size+1] for i in ix])
+    y = torch.stack([data_out[i:i+block_size] for i in ix])
     x, y = x.to(device), y.to(device)
     return x, y
 
@@ -67,112 +80,118 @@ def estimate_loss():
         out[split] = losses.mean()
     model.train()
     return out
-
-class NewGELU(nn.Module):
-    def forward(self, x):
-        return 0.5 * x * (1.0 + torch.tanh(math.sqrt(2.0 / math.pi) * (x + 0.044715 * torch.pow*(x, 3.0))))
-
-class CausalSelfAttention(nn.Module):
-    def __init__(self, config):
-        super().__init__()
-        assert config.n_embed % config.n_head == 0
-        self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd)
-        self.c_proj = nn.Linear(config.n_embd, config.n_embd)
-        self.register_buffer("bias", torch.tril(torch.ones(config.block_size, config.block_size)).view(1, 1, config.block_size, config.block_size))
-        self.n_head = config.n_head
-        self.n_embd = config.n_embd
     
+class Head(nn.Module):
+    def __init__(self, head_size):
+        self.key = nn.Linear(n_embd, head_size, bias = False)
+        self.query = nn.Linear(n_embd, head_size, bias = False)
+        self.value = nn.Linear(n_embd, head_size, bias = False)
+        self.register_buffer('tril', torch.tril(torch.ones(block_size, block_size)))
+        self.dropout = nn.Dropout(dropout)
+
     def forward(self, x):
-        B, T, C = x.size()
-        q, k, v = self.c_attn(x).split(self.n_embd, dim=2)
-        k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
-        q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
-        v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
+        B,T,C = x.shape
+        k = self.key(x)
+        q = self.query(x)
 
-        att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
-        att = att.masked_fill(self.bias[:,:,:T,:T] == 0, float('-inf'))
-        att = F.softmax(att, dim=-1)
-        y = att @ v
-        y = y.transpose(1, 2).contiguous().view(B, T, C)
+        wei = q @ k.transpose(-2, -1) * k.shape[-1]**-0.5
+        wei = wei.masked_fill(self.tril[:T, :T] == 0, float('-inf'))
+        wei = F.softmax(wei, dim=-1)
+        wei = self.dropout(wei)
+        v = self.value(x)
+        out = wei @ v
+        return out
 
-        y = self.c_proj(y)
-        return y
+class MultiHeadAttention(nn.Module):
+    def __init__(self, num_heads, head_size):
+        super().__init__()
+        self.heads = nn.ModuleList([Head(head_size) for _ in range(num_heads)])
+        self.proj = nn.Linear(head_size * num_heads, n_embd)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x):
+        out = torch.cat([h(x) for h in self.heads], dim=-1)
+        out = self.dropout(self.proj(out))
+        return out
+
+class FeedForward(nn.Module):
+    def __init__(self, n_embd):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(n_embd, 4 * n_embd),
+            nn.ReLU(),
+            nn.Linear(4 * n_embd, n_embd),
+            nn.Dropout(dropout)
+        )
+
+    def forward(self, x):
+        return self.net(x)
 
 class Block(nn.Module):
-    def __init__(self, config):
+    def __init__(self, n_embd, n_head):
         super().__init__()
-        self.ln_1 = nn.LayerNorm(config.n_embd)
-        self.attn = CausalSelfAttention(config)
-        self.ln_2 = nn.LayerNorm(config.n_embd)
-        self.mlp = nn.ModuleDict(dict(
-            c_fc = nn.Linear(config.n_embd, 4*config.n_embd),
-            c_proj = nn.Linear(4 * config.n_embd, config.n_embd),
-            act = NewGELU(),
-        ))
-        m = self.mlp
-        self.mlpf = lambda x: m.c_proj(m.act(m.c_fc(x)))
+        head_size = n_embd // n_head
+        self.sa = MultiHeadAttention(n_head, head_size)
+        self.ffwd = FeedForward(n_embd)
+        self.ln1 = nn.LayerNorm(n_embd)
+        self.ln2 = nn.LayerNorm(n_embd)
 
     def forward(self, x):
-        x = x + self.attn(self.ln_1(x))
-        x = x + self.mlpf(self.ln_2(x))
+        x = x + self.sa(self.ln1(x))
+        x = x + self.ffwd(self.ln2(x))
         return x
 
-class Transformer(nn.Module):
-    def __init__(self, config):
-        self.block_size = config.block_size
+class XfmrModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.token_embedding_table = nn.Embedding(vocab_size, n_embd)
+        self.position_embedding_table = nn.Embedding(block_size, n_embd)
+        self.blocks = nn.Sequential(*[Block(n_embd, n_head = n_head) for _ in range(n_layer)])
+        self.ln_f = nn.LayerNorm(n_embd)
+        self.lm_head = nn.Linear(n_embd, output_size)
+        self.apply(self.__init__weights)
 
-        self.transformer = nn.ModuleDict(dict(
-            wte = nn.Embedding(config.vocab_size, config.n_embd),
-            wpe = nn.Embedding(config.block_size, config.n_embd),
-            h = nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
-            ln_f = nn.LayerNorm(config.n_embd),
-        ))
-        self.lm_head = nn.Linear(config.n_embd, config.output_size, bias=False)
-        n_params = sum(p.numel() for p in self.transformer.parameters())
-        print("number of parameters: %.2fM" %(n_params/1e6,))
-
-    def get_block_size(self):
-        return self.block_size
-
+    def __init__weights(self, module):
+        if isinstance(module, nn.Linear):
+            torch.nn.init._no_grad_normal_(module.weight, mean = 0.0, std = 0.02)
+            if module.bias is not None:
+                torch.nn.init.zeros_(module.bias)
+        elif isinstance(module, nn.Embedding):
+            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+    
     def forward(self, idx, targets = None):
-        device = idx.device
-        b, t = idx.size()
-        assert t <= self.block_size, f"Cannot forward sequence of length {t}, block size is only {self.block_size}"
-        pos = torch.arange(0, t, dtype = torch.long, device = device).unsqueeze(0)
-
-        tok_emb = self.transformer.wte(idx)
-        pos_emb = self.transformer.wpe(pos)
+        B, T = idx.shape
+        tok_emb = self.token_embedding_table(idx)
+        pos_emb = self.position_embedding_table(torch.arrange(T, device = device))
         x = tok_emb + pos_emb
-        for block in self.transformer.h:
-            x = block(x)
-        x = self.transformer.ln_f(x)
+        x = self.blocks(x)
+        x = self.ln_f(x)
         x = self.lm_head(x)
         logits = torch.sum(x, dim=-2, keepdim=false)
 
-        loss = None
-        if targets is not None:
-            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index = -1)
+        if targets is None:
+            loss = None
+        else:
+            B, C = logits.shape
+            logits = logits.view(B, C)
+            targets = targets.view(B)
+            loss = F.cross_entropy(logits, targets)
 
         return logits, loss
 
-config = ModelConfig(vocab_size = vocab_size, block_size = block_size, output_size = output_size)
-model = Transformer(config)
+model = XfmrModel()
 m = model.to(device)
+print(sum(p.numel() for p in m.parameters())/1e6, 'M parameters')
 
-# create a PyTorch optimizer
-optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
+optimizer = torch.optim.AdamW(model.parameters(), lr = learning_rate)
 
 for iter in range(max_iters):
-
-    # every once in a while evaluate the loss on train and val sets
-    if iter % eval_interval == 0:
+    if iter % eval_interval == 0 or iter == max_iters - 1:
         losses = estimate_loss()
         print(f"step {iter}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
 
-    # sample a batch of data
     xb, yb = get_batch('train')
 
-    # evaluate the loss
     logits, loss = model(xb, yb)
     optimizer.zero_grad(set_to_none=True)
     loss.backward()
