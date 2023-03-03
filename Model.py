@@ -1,12 +1,13 @@
 import torch
 import torch.nn as nn
+import math
 from torch.nn import functional as F
 
 # hyperparameters
-batch_size = 32 # how many independent sequences will we process in parallel?
-block_size = 8 # what is the maximum context length for predictions?
+batch_size = 8 # how many independent sequences will we process in parallel?
+block_size = 16 # what is the maximum context length for predictions?
 max_iters = 3000
-eval_interval = 300
+eval_interval = 100
 learning_rate = 1e-2
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 eval_iters = 200
@@ -35,6 +36,14 @@ n = int(0.9*len(data)) # first 90% will be train, rest val
 train_data = data[:n]
 val_data = data[n:]
 
+class ModelConfig:
+    block_size: int = None
+    vocab_size: int = None
+    output_size: int = None
+    n_layer: int = 4
+    n_embd: int = 64
+    n_head: int = 4
+
 # data loading
 def get_batch(split):
     # generate a small batch of data of inputs x and targets y
@@ -59,30 +68,95 @@ def estimate_loss():
     model.train()
     return out
 
-# super simple bigram model
-class BigramLanguageModel(nn.Module):
+class NewGELU(nn.Module):
+    def forward(self, x):
+        return 0.5 * x * (1.0 + torch.tanh(math.sqrt(2.0 / math.pi) * (x + 0.044715 * torch.pow*(x, 3.0))))
 
-    def __init__(self, vocab_size):
+class CausalSelfAttention(nn.Module):
+    def __init__(self, config):
         super().__init__()
-        # each token directly reads off the logits for the next token from a lookup table
-        self.token_embedding_table = nn.Embedding(vocab_size, vocab_size)
+        assert config.n_embed % config.n_head == 0
+        self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd)
+        self.c_proj = nn.Linear(config.n_embd, config.n_embd)
+        self.register_buffer("bias", torch.tril(torch.ones(config.block_size, config.block_size)).view(1, 1, config.block_size, config.block_size))
+        self.n_head = config.n_head
+        self.n_embd = config.n_embd
+    
+    def forward(self, x):
+        B, T, C = x.size()
+        q, k, v = self.c_attn(x).split(self.n_embd, dim=2)
+        k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
+        q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
+        v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
 
-    def forward(self, idx, targets=None):
+        att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
+        att = att.masked_fill(self.bias[:,:,:T,:T] == 0, float('-inf'))
+        att = F.softmax(att, dim=-1)
+        y = att @ v
+        y = y.transpose(1, 2).contiguous().view(B, T, C)
 
-        # idx and targets are both (B,T) tensor of integers
-        logits = self.token_embedding_table(idx) # (B,T,C)
+        y = self.c_proj(y)
+        return y
 
-        if targets is None:
-            loss = None
-        else:
-            B, T, C = logits.shape
-            logits = logits.view(B, C)
-            targets = targets.view(B)
-            loss = F.cross_entropy(logits, targets)
+class Block(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.ln_1 = nn.LayerNorm(config.n_embd)
+        self.attn = CausalSelfAttention(config)
+        self.ln_2 = nn.LayerNorm(config.n_embd)
+        self.mlp = nn.ModuleDict(dict(
+            c_fc = nn.Linear(config.n_embd, 4*config.n_embd),
+            c_proj = nn.Linear(4 * config.n_embd, config.n_embd),
+            act = NewGELU(),
+        ))
+        m = self.mlp
+        self.mlpf = lambda x: m.c_proj(m.act(m.c_fc(x)))
+
+    def forward(self, x):
+        x = x + self.attn(self.ln_1(x))
+        x = x + self.mlpf(self.ln_2(x))
+        return x
+
+class Transformer(nn.Module):
+    def __init__(self, config):
+        self.block_size = config.block_size
+
+        self.transformer = nn.ModuleDict(dict(
+            wte = nn.Embedding(config.vocab_size, config.n_embd),
+            wpe = nn.Embedding(config.block_size, config.n_embd),
+            h = nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
+            ln_f = nn.LayerNorm(config.n_embd),
+        ))
+        self.lm_head = nn.Linear(config.n_embd, config.output_size, bias=False)
+        n_params = sum(p.numel() for p in self.transformer.parameters())
+        print("number of parameters: %.2fM" %(n_params/1e6,))
+
+    def get_block_size(self):
+        return self.block_size
+
+    def forward(self, idx, targets = None):
+        device = idx.device
+        b, t = idx.size()
+        assert t <= self.block_size, f"Cannot forward sequence of length {t}, block size is only {self.block_size}"
+        pos = torch.arange(0, t, dtype = torch.long, device = device).unsqueeze(0)
+
+        tok_emb = self.transformer.wte(idx)
+        pos_emb = self.transformer.wpe(pos)
+        x = tok_emb + pos_emb
+        for block in self.transformer.h:
+            x = block(x)
+        x = self.transformer.ln_f(x)
+        x = self.lm_head(x)
+        logits = torch.sum(x, dim=-2, keepdim=false)
+
+        loss = None
+        if targets is not None:
+            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index = -1)
 
         return logits, loss
 
-model = BigramLanguageModel(vocab_size)
+config = ModelConfig(vocab_size = vocab_size, block_size = block_size, output_size = output_size)
+model = Transformer(config)
 m = model.to(device)
 
 # create a PyTorch optimizer
@@ -103,4 +177,3 @@ for iter in range(max_iters):
     optimizer.zero_grad(set_to_none=True)
     loss.backward()
     optimizer.step()
-
