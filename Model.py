@@ -211,17 +211,18 @@ while True:
     usage = input("Train or Test?")
     if usage == "Test":
         test = ""
-        while test != 'X':
+        while test != "X":
             test = input("Test your room name")
             test_inputs = []
-            for char in len(text):
+            for char in range(len(test)):
                 _input = [0] * block_size
                 for i in range(block_size):
-                    if char + i < len(subtext):
-                        _input[i] = chars.index(subtext[c + i])
+                    if char + i < len(text):
+                        if(chars.__contains__(text[c+i])):
+                            _input[i] = chars.index(text[c + i])
                 test_inputs.append(_input)
             test_input = torch.tensor(test_inputs)
             test_output = model(test_input)
-            print(outputs[torch.max(test_output)])
+            print(test_output)
     elif usage == "Train":
         RunTraining()
