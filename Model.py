@@ -34,20 +34,6 @@ output_size = len(outputs)
 _inputs = []
 _outputs = []
 
-for line in text.splitlines():
-    parts = line.split(',')
-    subtext = parts[0].upper()
-    part_length = len(parts)
-    for c in range(len(subtext)):
-        _input = [0] * block_size
-        _output = [0] * len(outputs)
-        for i in range(block_size):
-            if c + i < len(subtext):
-                _input[i] = chars.index(subtext[c + i])
-        _output[int(line.split(',')[part_length - 1])] = 1
-        _inputs.append(_input)
-        _outputs.append(_output)
-
 # Train and test splits
 inputs = torch.tensor(_inputs, dtype=torch.long)
 outputs = torch.tensor(_outputs, dtype=torch.float)
@@ -91,7 +77,7 @@ class OLFDataset(Dataset):
         self.max_len = 128
         #with open('OLFNetworkData.txt', 'r', encoding='utf-8') as f:
             #text = f.read()
-        for line in lines # text.splitlines():
+        for line in lines: # text.splitlines():
             line = line.strip().upper()
             classification = line.split(',')[-1]
             line = [c if self.chars.count(c) > 0 else '' for c in line]
@@ -117,7 +103,7 @@ def create_datasets(input_file):
         data = f.read()
     inputs = data.splitlines()
 
-    test_set_size = min(1000, int(len(data)) * 0.1)
+    test_set_size = min(1000, int(len(data) * 0.1))
     rp = torch.randperm(len(data)).tolist()
     train_words = [data[i] for i in rp[:-test_set_size]]
     test_words = [data[i] for i in rp[-test_set_size:]]
@@ -129,7 +115,7 @@ def create_datasets(input_file):
 
 class InfiniteDataLoader:
     def __init__(self, dataset, **kwargs):
-        train_sampler = torch.utils.data.RandomSampler()
+        train_sampler = torch.utils.data.RandomSampler(dataset, replacement=True, num_samples=int(1e10))
         self.train_loader = DataLoader(dataset, sampler=train_sampler, **kwargs)
         self.data_iter = iter(self.train_loader)
     
