@@ -1,4 +1,4 @@
-OPEN OFFICE,13
+OPEN OFFICE,150
 mens restroom,0
 womens restroom,0
 restroom,0
@@ -9,54 +9,54 @@ womens,0
 bathroom,0
 bath,0
 Restroom,0
-Theater,2
-Exhibit,2
-Assembly,2
-gallery,2
-Theater,2
-Exhibit,2
-Assembly,2
-gallery,2
-Theater,2
-Exhibit,2
-pantry,4
-break rm,4
-Break Room,4
-Pantry,4
-CONFERENCE RM,4
-CONF,4
-roof deck,4
-studio,4
-lobby,4
-exhibit,4
-Office,13
-Open Office,13
-Office,13
-Open Office,13
-Office,13
-Open Office,13
-Office,13
-Open Office,13
-Office,13
-Open Office,13
-UNIT 101,14
-unit,14
-UNIT 301,14
-unit 600 balcony,14
-suite,14
-room,14
-RM,14
-STE,14
-suite,14
-room,14
-trash chute access room,16
-janitor,16
-stor,16
-work room,16
-jan,16
-copy,16
-stor,16
-work room,16
-jan,16
-copy,16
-Warehouse,17
+Theater,7
+Exhibit,7
+Assembly,7
+gallery,7
+Theater,7
+Exhibit,7
+Assembly,7
+gallery,7
+Theater,7
+Exhibit,7
+pantry,15
+break rm,15
+Break Room,15
+Pantry,15
+CONFERENCE RM,15
+CONF,15
+roof deck,15
+studio,15
+lobby,15
+exhibit,15
+Office,150
+Open Office,150
+Office,150
+Open Office,150
+Office,150
+Open Office,150
+Office,150
+Open Office,150
+Office,150
+Open Office,150
+UNIT 101,200
+unit,200
+UNIT 301,200
+unit 600 balcony,200
+suite,200
+room,200
+RM,200
+STE,200
+suite,200
+room,200
+trash chute access room,300
+janitor,300
+stor,300
+work room,300
+jan,300
+copy,300
+stor,300
+work room,300
+jan,300
+copy,300
+Warehouse,500
