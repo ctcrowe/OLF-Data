@@ -1,9 +1,10 @@
 import torch
 import torch.nn as nn
-import math
+import time
 import os
 from torch.nn import functional as F
 from torch.utils.data import Dataset
+from torch.utils.data.dataloader import DataLoader
 from dataclasses import dataclass
 
 # hyperparameters
@@ -82,33 +83,78 @@ def estimate_loss():
     return out
 
 class OLFDataset(Dataset):
-    def __init__(self, words, chars, max_len):
-        self.txt_path = "/workspaces/OLF-Data/OLFNetworkData.txt"
+    def __init__(self, lines):
+        #self.txt_path = "/workspaces/OLF-Data/OLFNetworkData.txt"
         self.data = []
-        with open('OLFNetworkData.txt', 'r', encoding='utf-8') as f:
-            text = f.read()
-            for line in text.splitlines():
-                self.data.append([line.split(',')[0], line.split(',')[-1]])
+        self.chars = [' ', ',', '_', '.', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M',
+        'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9']
+        self.max_len = 128
+        #with open('OLFNetworkData.txt', 'r', encoding='utf-8') as f:
+            #text = f.read()
+        for line in lines # text.splitlines():
+            line = line.strip().upper()
+            classification = line.split(',')[-1]
+            line = [c if self.chars.count(c) > 0 else '' for c in line]
+            self.data.append([line, classification])
         self.class_map = {"0" : 0, "5" : 1, "7" : 2, "11" : 3, "15" : 4, "20" : 5, "30" : 6, "35" : 7, "40" : 8, "50" : 9, "60" : 10, "100" : 11, "120" : 12,
                           "150" : 13, "200" : 14, "240" : 15, "300" : 16, "500" : 17}
+        self.stoi = {ch:i+1 for i,ch in enumerate(chars)}
     
     def __len__(self):
         return len(self.data)
-    
-    def contains(self, word):
-        return word in self.words
-    
-    def get_output_length(self):
-        return self.max_len + 1
     
     def __getitem__(self, idx):
         data, class_name = self.data[idx]
         class_id = self.class_map[class_name]
         class_id = torch.tensor([class_id])
-        x = torch.zeros(self.max_len + 1, dtype=torch.long)
-        class_id = self.class_map[]
+        ix = torch.tensor([self.stoi[w] for w in data], dtype = torch.long)
+        x = torch.zeros(self.max_len, dtype=torch.long)
         x[1:1+len(ix)] = ix
+        return x, class_id
+    
+def create_datasets(input_file):
+    with open(input_file, 'r') as f:
+        data = f.read()
+    inputs = data.splitlines()
 
+    test_set_size = min(1000, int(len(data)) * 0.1)
+    rp = torch.randperm(len(data)).tolist()
+    train_words = [data[i] for i in rp[:-test_set_size]]
+    test_words = [data[i] for i in rp[-test_set_size:]]
+    print(f"split up the dataset into {len(train_words)} training examples and {len(test_words)} test examples")
+
+    train_dataset = OLFDataset(train_words)
+    test_dataset = OLFDataset(test_words)
+    return train_dataset, test_dataset
+
+class InfiniteDataLoader:
+    def __init__(self, dataset, **kwargs):
+        train_sampler = torch.utils.data.RandomSampler()
+        self.train_loader = DataLoader(dataset, sampler=train_sampler, **kwargs)
+        self.data_iter = iter(self.train_loader)
+    
+    def next(self):
+        try:
+            batch = next(self.data_iter)
+        except StopIteration:
+            self.data_iter = iter(self.train_loader)
+            batch = next(self.data_iter)
+        return batch
+
+def evaluate(model, dataset, max_batches=None):
+    model.eval()
+    loader = DataLoader(dataset, shuffle=True, batch_size=batch_size, num_workers=0)
+    losses = []
+    for i, batch in enumerate(loader):
+        batch = [t.to(device) for t in batch]
+        X, Y = batch
+        logits, loss = model(X, Y)
+        losses.append(loss.item())
+        if max_batches is not None and i >= max_batches:
+            break
+    mean_loss = torch.tensor(losses).mean().item()
+    model.train()
+    return mean_loss
 
 class Head(nn.Module):
     def __init__(self, head_size):
@@ -209,20 +255,7 @@ class XfmrModel(nn.Module):
 
         return logits, loss
 
-def RunTraining():
-    for iter in range(max_iters):
-        if iter % 500 == 0 or iter == max_iters - 1:
-            torch.save(model.state_dict(), path)
-        if iter % eval_interval == 0 or iter == max_iters - 1:
-            losses = estimate_loss()
-            print(f"step {iter}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
-
-        xb, yb = get_batch('train')
-
-        logits, loss = model(xb, yb)
-        optimizer.zero_grad(set_to_none=True)
-        loss.backward()
-        optimizer.step()
+txt_path = "/workspaces/OLF-Data/OLFNetworkData.txt"
 
 path = "/workspaces/OLF-Data/OLFNetwork.pt"
 model = XfmrModel()
@@ -235,12 +268,54 @@ print(sum(p.numel() for p in m.parameters())/1e6, 'M parameters')
 
 optimizer = torch.optim.AdamW(model.parameters(), lr = learning_rate)
 
+def RunTraining():
+    train_dataset, test_dataset = create_datasets(txt_path)
+    batch_loader = InfiniteDataLoader(train_dataset)
+
+    best_loss = None
+    step = 0
+
+    while True:
+        t0 = time.time()
+        batch = batch_loader.next()
+        batch = [t.to(device) for t in batch]
+        X, Y = batch
+
+        logits, loss = model(X, Y)
+
+        model.zero_grad(set_to_none = True)
+        loss.backward()
+        optimizer.step()
+
+        if args.device.startswith('cuda'):
+            torch.cuda.synchronize()
+        t1 = time.time()
+
+        if step % 100 == 0:
+            print(f"step {step} | loss {loss.item():.4f} | step time {(t1-t0)*1000:.2f}ms")
+
+        if step < 0 and step % 500 == 0:
+            train_loss = evaluate(model, train_dataset, batch_size=10, max_batches=10)
+            test_loss = evaluate(model, test_dataset, batch_size=10, max_batches=10)
+            print(f"step {step} train loss: {train_loss} test loss: {test_loss}")
+            # save the model to disk if it has improved
+            if best_loss is None or test_loss < best_loss:
+                print(f"test loss {test_loss} is the best so far, saving model to {path}")
+                torch.save(model.state_dict(), path)
+                best_loss = test_loss
+            
+            
+        #if step > 0 and step % 200 == 0:
+        #    print_samples(num=10)
+
+        step+=1
+
 while True:
     usage = input("Train or Test?")
     if usage == "Test":
         test = ""
         while test != "X":
-            test = input("Test your room name")
+            text = input("Test your room name")
             test_inputs = []
             for char in range(len(test)):
                 _input = [0] * block_size
