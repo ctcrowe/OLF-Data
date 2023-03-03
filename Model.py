@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import math
+import os
 from torch.nn import functional as F
 from dataclasses import dataclass
 
@@ -8,13 +9,13 @@ from dataclasses import dataclass
 batch_size = 8 # how many independent sequences will we process in parallel?
 block_size = 16 # what is the maximum context length for predictions?
 max_iters = 5000
-eval_interval = 500
+eval_interval = 100
 learning_rate = 3e-4
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 eval_iters = 200
-n_embd = 384
-n_head = 6
-n_layer = 6
+n_embd = 64
+n_head = 4
+n_layer = 4
 dropout = 0.2
 # ------------
 
@@ -43,13 +44,13 @@ for line in text.splitlines():
         for i in range(block_size):
             if c + i < len(subtext):
                 _input[i] = chars.index(subtext[c + i])
-            _output[int(line.split(',')[part_length - 1])]
-            _inputs.append(_input)
-            _outputs.append(_output)
+        _output[int(line.split(',')[part_length - 1])] = 1
+        _inputs.append(_input)
+        _outputs.append(_output)
 
 # Train and test splits
 inputs = torch.tensor(_inputs, dtype=torch.long)
-outputs = torch.tensor(_outputs, dtype=torch.long)
+outputs = torch.tensor(_outputs, dtype=torch.float)
 n = int(0.9*len(inputs)) # first 90% will be train, rest val
 train_data = inputs[:n]
 train_outputs = outputs[:n]
@@ -62,8 +63,8 @@ def get_batch(split):
     data = train_data if split == 'train' else val_data
     data_out = train_outputs if split == 'train' else val_outputs
     ix = torch.randint(len(data) - block_size, (batch_size,))
-    x = torch.stack([data[i:i+block_size] for i in ix])
-    y = torch.stack([data_out[i:i+block_size] for i in ix])
+    x = torch.stack([data[i] for i in ix])
+    y = torch.stack([data_out[i] for i in ix])
     x, y = x.to(device), y.to(device)
     return x, y
 
@@ -83,6 +84,7 @@ def estimate_loss():
     
 class Head(nn.Module):
     def __init__(self, head_size):
+        super().__init__()
         self.key = nn.Linear(n_embd, head_size, bias = False)
         self.query = nn.Linear(n_embd, head_size, bias = False)
         self.value = nn.Linear(n_embd, head_size, bias = False)
@@ -153,7 +155,7 @@ class XfmrModel(nn.Module):
 
     def __init__weights(self, module):
         if isinstance(module, nn.Linear):
-            torch.nn.init._no_grad_normal_(module.weight, mean = 0.0, std = 0.02)
+            torch.nn.init.normal_(module.weight, mean = 0.0, std = 0.02)
             if module.bias is not None:
                 torch.nn.init.zeros_(module.bias)
         elif isinstance(module, nn.Embedding):
@@ -162,37 +164,61 @@ class XfmrModel(nn.Module):
     def forward(self, idx, targets = None):
         B, T = idx.shape
         tok_emb = self.token_embedding_table(idx)
-        pos_emb = self.position_embedding_table(torch.arrange(T, device = device))
+        pos_emb = self.position_embedding_table(torch.arange(T, device = device))
         x = tok_emb + pos_emb
         x = self.blocks(x)
         x = self.ln_f(x)
         x = self.lm_head(x)
-        logits = torch.sum(x, dim=-2, keepdim=false)
+        logits = torch.sum(x, dim=-2, keepdim=False)
 
         if targets is None:
             loss = None
         else:
-            B, C = logits.shape
-            logits = logits.view(B, C)
-            targets = targets.view(B)
+            #B, C = logits.shape
+            #logits = logits.view(B, C)
+            #targets = targets.view(B * T)
             loss = F.cross_entropy(logits, targets)
 
         return logits, loss
 
+def RunTraining():
+    for iter in range(max_iters):
+        if iter % 500 == 0 or iter == max_iters - 1:
+            torch.save(model.state_dict, path)
+        if iter % eval_interval == 0 or iter == max_iters - 1:
+            losses = estimate_loss()
+            print(f"step {iter}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
+
+        xb, yb = get_batch('train')
+
+        logits, loss = model(xb, yb)
+        optimizer.zero_grad(set_to_none=True)
+        loss.backward()
+        optimizer.step()
+
+path = "/workspaces/OLF-Data/OLFNetwork.pt"
 model = XfmrModel()
+if os.path.isfile(path):
+    model.load_state_dict(torch.load(path))
+
 m = model.to(device)
 print(sum(p.numel() for p in m.parameters())/1e6, 'M parameters')
 
 optimizer = torch.optim.AdamW(model.parameters(), lr = learning_rate)
 
-for iter in range(max_iters):
-    if iter % eval_interval == 0 or iter == max_iters - 1:
-        losses = estimate_loss()
-        print(f"step {iter}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
-
-    xb, yb = get_batch('train')
-
-    logits, loss = model(xb, yb)
-    optimizer.zero_grad(set_to_none=True)
-    loss.backward()
-    optimizer.step()
+while True:
+    usage = input("Train or Test?")
+    if usage == "Train":
+        test = input("Test your room name")
+        test_inputs = []
+        for char in len(text):
+            _input = [0] * block_size
+            for i in range(block_size):
+                if char + i < len(subtext):
+                    _input[i] = chars.index(subtext[c + i])
+            test_inputs.append(_input)
+        test_input = torch.tensor(test_inputs)
+        test_output = model(test_input)
+        print(outputs[torch.max(test_output)])
+    elif usage == "Test":
+        RunTraining()
