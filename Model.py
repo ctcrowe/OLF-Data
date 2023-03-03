@@ -3,6 +3,7 @@ import torch.nn as nn
 import math
 import os
 from torch.nn import functional as F
+from torch.utils.data import Dataset
 from dataclasses import dataclass
 
 # hyperparameters
@@ -19,8 +20,6 @@ n_layer = 4
 dropout = 0.2
 # ------------
 
-with open('OLFNetworkData.txt', 'r', encoding='utf-8') as f:
-    text = f.read()
 
 chars = [' ', ',', '_', '.', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M',
         'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9']
@@ -81,7 +80,36 @@ def estimate_loss():
         out[split] = losses.mean()
     model.train()
     return out
+
+class OLFDataset(Dataset):
+    def __init__(self, words, chars, max_len):
+        self.txt_path = "/workspaces/OLF-Data/OLFNetworkData.txt"
+        self.data = []
+        with open('OLFNetworkData.txt', 'r', encoding='utf-8') as f:
+            text = f.read()
+            for line in text.splitlines():
+                self.data.append([line.split(',')[0], line.split(',')[-1]])
+        self.class_map = {"0" : 0, "5" : 1, "7" : 2, "11" : 3, "15" : 4, "20" : 5, "30" : 6, "35" : 7, "40" : 8, "50" : 9, "60" : 10, "100" : 11, "120" : 12,
+                          "150" : 13, "200" : 14, "240" : 15, "300" : 16, "500" : 17}
     
+    def __len__(self):
+        return len(self.data)
+    
+    def contains(self, word):
+        return word in self.words
+    
+    def get_output_length(self):
+        return self.max_len + 1
+    
+    def __getitem__(self, idx):
+        data, class_name = self.data[idx]
+        class_id = self.class_map[class_name]
+        class_id = torch.tensor([class_id])
+        x = torch.zeros(self.max_len + 1, dtype=torch.long)
+        class_id = self.class_map[]
+        x[1:1+len(ix)] = ix
+
+
 class Head(nn.Module):
     def __init__(self, head_size):
         super().__init__()
