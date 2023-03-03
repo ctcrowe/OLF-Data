@@ -1,0 +1,62 @@
+OPEN OFFICE,13
+mens restroom,0
+womens restroom,0
+restroom,0
+bathroom,0
+toilet room,0
+mens,0
+womens,0
+bathroom,0
+bath,0
+Restroom,0
+Theater,2
+Exhibit,2
+Assembly,2
+gallery,2
+Theater,2
+Exhibit,2
+Assembly,2
+gallery,2
+Theater,2
+Exhibit,2
+pantry,4
+break rm,4
+Break Room,4
+Pantry,4
+CONFERENCE RM,4
+CONF,4
+roof deck,4
+studio,4
+lobby,4
+exhibit,4
+Office,13
+Open Office,13
+Office,13
+Open Office,13
+Office,13
+Open Office,13
+Office,13
+Open Office,13
+Office,13
+Open Office,13
+UNIT 101,14
+unit,14
+UNIT 301,14
+unit 600 balcony,14
+suite,14
+room,14
+RM,14
+STE,14
+suite,14
+room,14
+trash chute access room,16
+janitor,16
+stor,16
+work room,16
+jan,16
+copy,16
+stor,16
+work room,16
+jan,16
+copy,16
+Warehouse,17
