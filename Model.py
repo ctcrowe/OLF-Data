@@ -9,7 +9,7 @@ from dataclasses import dataclass
 
 # hyperparameters
 batch_size = 8 # how many independent sequences will we process in parallel?
-block_size = 16 # what is the maximum context length for predictions?
+block_size = 128 # what is the maximum context length for predictions?
 max_iters = 5000
 eval_interval = 100
 learning_rate = 3e-4
@@ -24,24 +24,8 @@ dropout = 0.2
 
 chars = [' ', ',', '_', '.', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M',
         'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9']
-
-outputs = ['0', '5', '7', '11', '15', '20', '30','35', '40', '50', '60', '100', '120', '150', '200', '240', '300', '500']
-
-# here are all the unique characters that occur in this text
-vocab_size = len(chars)
-output_size = len(outputs)
-
-_inputs = []
-_outputs = []
-
-# Train and test splits
-inputs = torch.tensor(_inputs, dtype=torch.long)
-outputs = torch.tensor(_outputs, dtype=torch.float)
-n = int(0.9*len(inputs)) # first 90% will be train, rest val
-train_data = inputs[:n]
-train_outputs = outputs[:n]
-val_data = inputs[n:]
-val_outputs = outputs[n:]
+class_map = {"0" : 0, "5" : 1, "7" : 2, "11" : 3, "15" : 4, "20" : 5, "30" : 6, "35" : 7, "40" : 8, "50" : 9, "60" : 10, "100" : 11, "120" : 12,
+            "150" : 13, "200" : 14, "240" : 15, "300" : 16, "500" : 17}
 
 # data loading
 def get_batch(split):
@@ -72,18 +56,17 @@ class OLFDataset(Dataset):
     def __init__(self, lines):
         #self.txt_path = "/workspaces/OLF-Data/OLFNetworkData.txt"
         self.data = []
-        self.chars = [' ', ',', '_', '.', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M',
-        'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9']
-        self.max_len = 128
+        self.chars = chars
+        self.class_map = class_map
+        self.max_len = block_size
         #with open('OLFNetworkData.txt', 'r', encoding='utf-8') as f:
             #text = f.read()
         for line in lines: # text.splitlines():
             line = line.strip().upper()
             classification = line.split(',')[-1]
-            line = [c if self.chars.count(c) > 0 else '' for c in line]
-            self.data.append([line, classification])
-        self.class_map = {"0" : 0, "5" : 1, "7" : 2, "11" : 3, "15" : 4, "20" : 5, "30" : 6, "35" : 7, "40" : 8, "50" : 9, "60" : 10, "100" : 11, "120" : 12,
-                          "150" : 13, "200" : 14, "240" : 15, "300" : 16, "500" : 17}
+            if classification in self.class_map:
+                line = [c if self.chars.count(c) > 0 else '' for c in line]
+                self.data.append([line, classification])
         self.stoi = {ch:i+1 for i,ch in enumerate(chars)}
     
     def __len__(self):
@@ -103,10 +86,10 @@ def create_datasets(input_file):
         data = f.read()
     inputs = data.splitlines()
 
-    test_set_size = min(1000, int(len(data) * 0.1))
-    rp = torch.randperm(len(data)).tolist()
-    train_words = [data[i] for i in rp[:-test_set_size]]
-    test_words = [data[i] for i in rp[-test_set_size:]]
+    test_set_size = min(1000, int(len(inputs) * 0.1))
+    rp = torch.randperm(len(inputs)).tolist()
+    train_words = [inputs[i] for i in rp[:-test_set_size]]
+    test_words = [inputs[i] for i in rp[-test_set_size:]]
     print(f"split up the dataset into {len(train_words)} training examples and {len(test_words)} test examples")
 
     train_dataset = OLFDataset(train_words)
@@ -206,11 +189,11 @@ class Block(nn.Module):
 class XfmrModel(nn.Module):
     def __init__(self):
         super().__init__()
-        self.token_embedding_table = nn.Embedding(vocab_size, n_embd)
+        self.token_embedding_table = nn.Embedding(len(chars), n_embd)
         self.position_embedding_table = nn.Embedding(block_size, n_embd)
         self.blocks = nn.Sequential(*[Block(n_embd, n_head = n_head) for _ in range(n_layer)])
         self.ln_f = nn.LayerNorm(n_embd)
-        self.lm_head = nn.Linear(n_embd, output_size)
+        self.lm_head = nn.Linear(n_embd, len(class_map.items()))
         self.apply(self.__init__weights)
 
     def __init__weights(self, module):
@@ -234,10 +217,11 @@ class XfmrModel(nn.Module):
         if targets is None:
             loss = None
         else:
-            #B, C = logits.shape
-            #logits = logits.view(B, C)
-            #targets = targets.view(B * T)
-            loss = F.cross_entropy(logits, targets)
+            B, C = logits.shape
+            logits = logits.view(B, C)
+            loss_targets = torch.nn.functional.one_hot(targets, len(class_map.items()))
+            loss_targets = loss_targets.view(B, len(class_map.items()))
+            loss = F.cross_entropy(logits, loss_targets.type(torch.FloatTensor))
 
         return logits, loss
 
@@ -256,7 +240,7 @@ optimizer = torch.optim.AdamW(model.parameters(), lr = learning_rate)
 
 def RunTraining():
     train_dataset, test_dataset = create_datasets(txt_path)
-    batch_loader = InfiniteDataLoader(train_dataset)
+    batch_loader = InfiniteDataLoader(train_dataset, batch_size = batch_size)
 
     best_loss = None
     step = 0
@@ -273,16 +257,16 @@ def RunTraining():
         loss.backward()
         optimizer.step()
 
-        if args.device.startswith('cuda'):
+        if device.startswith('cuda'):
             torch.cuda.synchronize()
         t1 = time.time()
 
         if step % 100 == 0:
             print(f"step {step} | loss {loss.item():.4f} | step time {(t1-t0)*1000:.2f}ms")
 
-        if step < 0 and step % 500 == 0:
-            train_loss = evaluate(model, train_dataset, batch_size=10, max_batches=10)
-            test_loss = evaluate(model, test_dataset, batch_size=10, max_batches=10)
+        if step > 0 and step % 500 == 0:
+            train_loss = evaluate(model, train_dataset, max_batches=5 * batch_size)
+            test_loss = evaluate(model, test_dataset, max_batches=5 * batch_size)
             print(f"step {step} train loss: {train_loss} test loss: {test_loss}")
             # save the model to disk if it has improved
             if best_loss is None or test_loss < best_loss:
@@ -302,16 +286,10 @@ while True:
         test = ""
         while test != "X":
             text = input("Test your room name")
-            test_inputs = []
-            for char in range(len(test)):
-                _input = [0] * block_size
-                for i in range(block_size):
-                    if char + i < len(text):
-                        if(chars.__contains__(text[c+i])):
-                            _input[i] = chars.index(text[c + i])
-                test_inputs.append(_input)
-            test_input = torch.tensor(test_inputs)
-            test_output = model(test_input)
-            print(test_output)
+            dataset = OLFDataset([text, '0'])
+            sample = dataset.__getitem__(0)
+            print(sample)
+            logits, loss = model(X, Y)
+            print(logits)
     elif usage == "Train":
         RunTraining()
