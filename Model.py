@@ -80,7 +80,9 @@ class OLFDataset(Dataset):
         #with open('OLFNetworkData.txt', 'r', encoding='utf-8') as f:
             #text = f.read()
         for line in lines: # text.splitlines():
-            self.data.append([get_Sample(line)])
+            base, sample = get_Sample(line)
+            if(class_map.get(sample, None) is not None):
+                self.data.append([base, sample])
         self.stoi = {ch:i+1 for i,ch in enumerate(chars)}
     
     def __len__(self):
