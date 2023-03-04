@@ -56,19 +56,19 @@ def get_Sample(input, printSample=False):
     input = input.strip().upper()
     lines = input.split(',')
     line = lines[0]
-    if len(lines) > 1 :
-        classification = line[-1]
-    else :
-        classification = None
-    sample = []
+    sample = [0] * block_size
     for i in range(len(line)):
         if(chars.count(line[i]) > 0):
-            sample.append(chars.index(line[i]))
-        else:
-            sample.append(0)
-    if printSample:
+            sample[i] = chars.index(line[i])
+    if len(lines) > 1 :
+        classification = lines[-1]
+        classification = class_map[classification]
+    else :
+        classification = 0
+    
+    if printSample :
         print(input, sample, classification)
-    return sample, classification
+    return torch.tensor(sample), torch.tensor(classification)
 
 class OLFDataset(Dataset):
     def __init__(self, lines):
@@ -81,8 +81,7 @@ class OLFDataset(Dataset):
             #text = f.read()
         for line in lines: # text.splitlines():
             base, sample = get_Sample(line)
-            if(class_map.get(sample, None) is not None):
-                self.data.append([base, sample])
+            self.data.append([base, sample])
         self.stoi = {ch:i+1 for i,ch in enumerate(chars)}
     
     def __len__(self):
@@ -90,12 +89,7 @@ class OLFDataset(Dataset):
     
     def __getitem__(self, idx):
         data, class_name = self.data[idx]
-        class_id = self.class_map[class_name]
-        class_id = torch.tensor([class_id])
-        ix = torch.tensor([self.stoi[w] for w in data], dtype = torch.long)
-        x = torch.zeros(self.max_len, dtype=torch.long)
-        x[1:1+len(ix)] = ix
-        return x, class_id
+        return data, class_name
     
 def create_datasets(input_file):
     with open(input_file, 'r') as f:
