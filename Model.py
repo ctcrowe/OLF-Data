@@ -9,7 +9,7 @@ from dataclasses import dataclass
 
 # hyperparameters
 batch_size = 8 # how many independent sequences will we process in parallel?
-block_size = 128 # what is the maximum context length for predictions?
+block_size = 128
 max_iters = 5000
 eval_interval = 100
 learning_rate = 3e-4
@@ -52,6 +52,24 @@ def estimate_loss():
     model.train()
     return out
 
+def get_Sample(input, printSample=False):
+    input = input.strip().upper()
+    lines = input.split(',')
+    line = lines[0]
+    if len(lines) > 1 :
+        classification = line[-1]
+    else :
+        classification = None
+    sample = []
+    for i in range(len(line)):
+        if(chars.count(line[i]) > 0):
+            sample.append(chars.index(line[i]))
+        else:
+            sample.append(0)
+    if printSample:
+        print(input, sample, classification)
+    return sample, classification
+
 class OLFDataset(Dataset):
     def __init__(self, lines):
         #self.txt_path = "/workspaces/OLF-Data/OLFNetworkData.txt"
@@ -62,11 +80,7 @@ class OLFDataset(Dataset):
         #with open('OLFNetworkData.txt', 'r', encoding='utf-8') as f:
             #text = f.read()
         for line in lines: # text.splitlines():
-            line = line.strip().upper()
-            classification = line.split(',')[-1]
-            if classification in self.class_map:
-                line = [c if self.chars.count(c) > 0 else '' for c in line]
-                self.data.append([line, classification])
+            self.data.append([get_Sample(line)])
         self.stoi = {ch:i+1 for i,ch in enumerate(chars)}
     
     def __len__(self):
@@ -286,9 +300,9 @@ while True:
         test = ""
         while test != "X":
             text = input("Test your room name")
-            dataset = OLFDataset([text, '0'])
-            sample = dataset.__getitem__(0)
-            print(sample)
+            sample = get_Sample(text, True)
+            X, Y = sample
+            X = torch.Tensor(X, dtype=torch.Long)
             logits, loss = model(X, Y)
             print(logits)
     elif usage == "Train":
