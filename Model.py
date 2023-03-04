@@ -298,8 +298,10 @@ while True:
             text = input("Test your room name")
             sample = get_Sample(text, True)
             X, Y = sample
-            X = torch.Tensor(X, dtype=torch.Long)
+            X = X.view(1, -1)
             logits, loss = model(X, Y)
             print(logits)
+            max = torch.argmax(logits)
+            print(list(class_map.keys())[max])
     elif usage == "Train":
         RunTraining()
