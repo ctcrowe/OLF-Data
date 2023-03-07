@@ -60,3 +60,5 @@ work room,300
 jan,300
 copy,300
 Warehouse,500
+storage,300
+storage,300
