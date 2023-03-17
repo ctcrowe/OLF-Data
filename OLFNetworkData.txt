@@ -62,3 +62,6 @@ copy,300
 Warehouse,500
 storage,300
 storage,300
+CORRIDOR,0
+HALLWAY,0
+CIRCULATION,0
